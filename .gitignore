@@ -1,0 +1,59 @@
+# Gradle cache
+.gradle
+build/
+
+# built application files
+*.apk
+*.ap_
+
+# files for the dex VM
+*.dex
+
+# Java class files
+*.class
+
+# generated files
+bin/
+gen/
+out/
+classes/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Intellij IDEA project files
+*.iml
+.idea/
+
+# Old-style IDEA project files
+*.ipr
+*.iws
+
+# Log Files
+*.log
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+Desktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Signing files
+.signing/
+
+# Sandbox stuff
+_sandbox
+
+# Ignore Gradle GUI config
+gradle-app.setting

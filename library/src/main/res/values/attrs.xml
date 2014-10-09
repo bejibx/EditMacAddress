@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <declare-styleable name="EditMacAddress">
+        <attr name="filler" format="string" />
+        <attr name="delimiter" format="string" />
+    </declare-styleable>
+
+</resources>
