@@ -30,7 +30,6 @@ import java.util.regex.Pattern;
  * 4. You could only input numbers from 0 to 9 and also hex-letters A, B, C, D, E, F in any case.
  *
  * Features:
- * TODO also make methods to do these
  * 1. You can specify delimiter character from XML using attribute "delimiter".
  * 2. You can specify filler character from XML using attribute "filler".
  */
@@ -80,7 +79,7 @@ public class EditMacAddress extends EditText
         setCursorVisible(false);
         setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         setImeOptions(getImeOptions() | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-        setText("  :  :  :  :  :  ");
+        setText("  :  :  :  :  :  ".replace(" ", mFiller).replace(":", mDelimiter));
         mTextLength = getText().length();
         setFilters(new InputFilter[]{new MacAddressInputValidator()});
     }
@@ -88,34 +87,33 @@ public class EditMacAddress extends EditText
     private void obtainAttributes(Context context, AttributeSet attrs)
     {
         TypedArray attributes = context.getTheme().obtainStyledAttributes(attrs, R.styleable.EditMacAddress, 0, 0);
+        String fillerStr = DEFAULT_FILLER;
+        String delimiterStr = DEFAULT_DELIMITER;
         try
         {
-            mFiller = attributes.getString(R.styleable.EditMacAddress_filler);
-            mDelimiter = attributes.getString(R.styleable.EditMacAddress_delimiter);
+            fillerStr = attributes.getString(R.styleable.EditMacAddress_filler);
+            delimiterStr = attributes.getString(R.styleable.EditMacAddress_delimiter);
         } finally
         {
             attributes.recycle();
         }
 
-        if (mFiller == null || mFiller.isEmpty()
-                || PERMITTED_SYMBOLS.contains(mFiller.charAt(0)))
+        if (fillerStr == null || fillerStr.isEmpty())
         {
-            mFiller = DEFAULT_FILLER;
+            setFiller(DEFAULT_FILLER.charAt(0));
         }
         else
         {
-            mFiller = String.valueOf(mFiller.charAt(0));
+            setFiller(fillerStr.charAt(0));
         }
 
-        if (mDelimiter == null || mDelimiter.isEmpty()
-                || PERMITTED_SYMBOLS.contains(mDelimiter.charAt(0))
-                || (mFiller.equals(DEFAULT_FILLER) && mDelimiter.equals(DEFAULT_FILLER)))
+        if (delimiterStr == null || delimiterStr.isEmpty())
         {
-            mDelimiter = ":";
+            setDelimiter(DEFAULT_DELIMITER.charAt(0));
         }
         else
         {
-            mDelimiter = String.valueOf(mDelimiter.charAt(0));
+            setDelimiter(delimiterStr.charAt(0));
         }
     }
 
@@ -215,6 +213,31 @@ public class EditMacAddress extends EditText
         selectAtPosition(getNextSelectablePosition(mCursorPosition));
     }
 
+    public void setDelimiter(char delimiter)
+    {
+        if (PERMITTED_SYMBOLS.contains(delimiter)
+                || (mFiller.equals(DEFAULT_FILLER) && delimiter == DEFAULT_FILLER.charAt(0)))
+        {
+            mDelimiter = ":";
+        }
+        else
+        {
+            mDelimiter = String.valueOf(delimiter);
+        }
+    }
+
+    public void setFiller(char filler)
+    {
+        if (PERMITTED_SYMBOLS.contains(filler))
+        {
+            mFiller = DEFAULT_FILLER;
+        }
+        else
+        {
+            mFiller = String.valueOf(filler);
+        }
+    }
+
     public String getUnformattedText()
     {
         return getText().toString().replace("[" + Pattern.quote(mDelimiter + mFiller) + "]", "");
@@ -276,6 +299,14 @@ public class EditMacAddress extends EditText
         return new NoSelectionInputConnection(this, false);
     }
 
+    /**
+     * This class is absolutely needed because it seems that some soft input methods incorrectly
+     * changing selection. Because of that often we get incorrect dstart/dend values in our input
+     * filter. For example we have [11:22:33:44:55:6|6|], so when user press "delete" button we
+     * are expecting to get dstart == 16 and dend == 17, but instead we get dstart == 15,
+     * dend == 16. When rejecting selection changes in input connection everything works as
+     * expected.
+     */
     private class NoSelectionInputConnection extends BaseInputConnection
     {
         public NoSelectionInputConnection(View targetView, boolean fullEditor)
@@ -297,7 +328,11 @@ public class EditMacAddress extends EditText
         public CharSequence filter(CharSequence source, int start, int end,
                                    Spanned destination, int dstart, int dend)
         {
-            if (DEBUG) Log.v(TAG, String.format("filter(source: \"%s\", start: %d, end: %d, dest: \"%s\", dstart: %d, dend: %d)", source, start, end, destination, dstart, dend));
+            if (DEBUG) Log.v(TAG, String.format(
+                    "filter(source: \"%s\", start: %d, end: %d, dest: \"%s\", dstart: %d, dend: %d)",
+                    source, start, end, destination, dstart, dend)
+            );
+
             /* Insertion is not allowed */
             if (dend - dstart == 0 && destination.length() > 0)
             {
