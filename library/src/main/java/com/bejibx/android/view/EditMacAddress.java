@@ -15,9 +15,8 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.EditText;
 
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.regex.Pattern;
+import java.util.HashMap;
+import java.util.LinkedList;
 
 /**
  * EditMacAddress is a small class which extended EditText to provide simpler way to input MAC addresses.
@@ -37,19 +36,16 @@ public class EditMacAddress extends EditText
 {
     private static final boolean DEBUG = false;
     private static final String TAG = "EditMacAddress";
-    private static final String DEFAULT_FILLER = " ";
-    private static final String DEFAULT_DELIMITER = ":";
+    private static final char DEFAULT_FILLER = ' ';
 
-    private String mDelimiter;
-    private String mFiller;
+    private char mFiller;
 
     private int mCursorPosition = 0;
-    private int mTextLength = 0;
+    private int mFirstSelectablePosition = 0;
+    private int mLastSelectablePosition = 0;
 
-    static final HashSet<Character> PERMITTED_SYMBOLS = new HashSet<Character>(Arrays.asList(
-            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
-            'a', 'b', 'c', 'd', 'e', 'f'
-    ));
+    private HashMap<Character, CharFilter> mFiltersCache = new HashMap<Character, CharFilter>();
+    private CharFilter[] mMask;
 
     private boolean mBackspacePressed = false;
     private boolean mInputRejected = false;
@@ -79,20 +75,19 @@ public class EditMacAddress extends EditText
         setCursorVisible(false);
         setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         setImeOptions(getImeOptions() | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-        setText("  :  :  :  :  :  ".replace(" ", mFiller).replace(":", mDelimiter));
-        mTextLength = getText().length();
+
+        parseMask("HH:HH:HH:HH:HH:HH");
+
         setFilters(new InputFilter[]{new MacAddressInputValidator()});
     }
 
     private void obtainAttributes(Context context, AttributeSet attrs)
     {
         TypedArray attributes = context.getTheme().obtainStyledAttributes(attrs, R.styleable.EditMacAddress, 0, 0);
-        String fillerStr = DEFAULT_FILLER;
-        String delimiterStr = DEFAULT_DELIMITER;
+        String fillerStr = String.valueOf(DEFAULT_FILLER);
         try
         {
             fillerStr = attributes.getString(R.styleable.EditMacAddress_filler);
-            delimiterStr = attributes.getString(R.styleable.EditMacAddress_delimiter);
         } finally
         {
             attributes.recycle();
@@ -100,91 +95,127 @@ public class EditMacAddress extends EditText
 
         if (fillerStr == null || fillerStr.isEmpty())
         {
-            setFiller(DEFAULT_FILLER.charAt(0));
+            setFiller(DEFAULT_FILLER);
         }
         else
         {
             setFiller(fillerStr.charAt(0));
         }
+    }
 
-        if (delimiterStr == null || delimiterStr.isEmpty())
+    private void parseMask(String mask)
+    {
+        LinkedList<CharFilter> positions = new LinkedList<CharFilter>();
+        char[] chars = mask.toCharArray();
+
+        int i = 0;
+        StringBuilder maskString = new StringBuilder();
+        while (i < chars.length)
         {
-            setDelimiter(DEFAULT_DELIMITER.charAt(0));
+            char maskChar = chars[i];
+            CharFilter filter;
+
+            if (mFiltersCache.containsKey(maskChar))
+            {
+                filter = mFiltersCache.get(maskChar);
+            }
+            else
+            {
+                filter = getFilterForCharacter(maskChar);
+                if (filter == null)
+                {
+                    filter = new AnyCharFilter(' ');
+                }
+                mFiltersCache.put(maskChar, filter);
+            }
+
+            positions.add(filter);
+            maskString.append(filter.getFiller());
+            if (filter.isSelectable())
+            {
+                if (i < mFirstSelectablePosition)
+                {
+                    mFirstSelectablePosition = i;
+                }
+                else if (i > mLastSelectablePosition)
+                {
+                    mLastSelectablePosition = i;
+                }
+            }
+            i++;
         }
-        else
-        {
-            setDelimiter(delimiterStr.charAt(0));
-        }
+
+        mMask = positions.toArray(new CharFilter[positions.size()]);
+        setText(maskString.toString());
     }
 
     private boolean isPositionSelectable(int position)
     {
-        int first = getFirstSelectablePosition();
-        int last = getLastSelectablePosition();
-        return position >= first &&
-                position <= last &&
-                (position + 1) % 3 != 0;
+        return position >= 0 && position < getMaskLength() && mMask[position].isSelectable();
     }
 
-    private boolean isValidSymbolForPosition(char symbol, int position)
+    private boolean isValidCharForPosition(char c, int pos)
     {
-        if (isPositionSelectable(position))
+        return pos >= 0 && pos < getMaskLength() && mMask[pos].isValidChar(c);
+    }
+
+    private char getFillerForPosition(int position)
+    {
+        if (position >= 0 && position < getMaskLength())
         {
-            return PERMITTED_SYMBOLS.contains(symbol);
+            return mMask[position].getFiller();
         }
         else
-            return String.valueOf(symbol).equals(mDelimiter);
+        {
+            return DEFAULT_FILLER;
+        }
     }
 
-    private int checkPosition(int pos)
+    private int getMaskLength()
     {
-        int first = getFirstSelectablePosition();
-        int last = getLastSelectablePosition();
-        if (pos > last)
-        {
-            pos = last;
-        }
-        if (pos < first)
-        {
-            pos = first;
-        }
-        return pos;
+        return mMask != null ? mMask.length : -1;
     }
 
     private int getNextSelectablePosition(int pos)
     {
-        if (isPositionSelectable(pos + 1))
-        {
-            pos++;
-        }
-        else
-        {
-            pos += 2;
-        }
-        return checkPosition(pos);
+        if (pos >= 0)
+            for (int i = pos + 1; i < getMaskLength(); i++)
+                if (mMask[i].isSelectable())
+                    return i;
+
+        return getLastSelectablePosition();
     }
 
     private int getPreviousSelectablePosition(int pos)
     {
-        if (isPositionSelectable(pos - 1))
-        {
-            pos--;
-        }
-        else
-        {
-            pos -= 2;
-        }
-        return checkPosition(pos);
+        if (pos < getMaskLength())
+            for (int i = pos - 1; i >= 0; i--)
+                if (mMask[i].isSelectable())
+                    return i;
+
+        return getFirstSelectablePosition();
     }
 
     private int getFirstSelectablePosition()
     {
-        return 0;
+        return mFirstSelectablePosition;
     }
 
     private int getLastSelectablePosition()
     {
-        return mTextLength - 1;
+        return mLastSelectablePosition;
+    }
+
+    protected CharFilter getFilterForCharacter(char maskCharacter)
+    {
+        switch (maskCharacter)
+        {
+            case 'H':
+                return new HexCharFilter(mFiller);
+
+            default:
+                return new DelimiterCharFilter(maskCharacter);
+        }
     }
 
     public void selectAtPosition(int position)
@@ -213,36 +244,27 @@ public class EditMacAddress extends EditText
         selectAtPosition(getNextSelectablePosition(mCursorPosition));
     }
 
-    public void setDelimiter(char delimiter)
-    {
-        if (PERMITTED_SYMBOLS.contains(delimiter)
-                || (mFiller.equals(DEFAULT_FILLER) && delimiter == DEFAULT_FILLER.charAt(0)))
-        {
-            mDelimiter = ":";
-        }
-        else
-        {
-            mDelimiter = String.valueOf(delimiter);
-        }
-    }
-
     public void setFiller(char filler)
     {
-        if (PERMITTED_SYMBOLS.contains(filler))
-        {
-            mFiller = DEFAULT_FILLER;
-        }
-        else
-        {
-            mFiller = String.valueOf(filler);
-        }
+        mFiller = filler;
     }
 
     public String getUnformattedText()
     {
-        return getText().toString().replace("[" + Pattern.quote(mDelimiter + mFiller) + "]", "");
+        StringBuilder unformatted = new StringBuilder(getText());
+        int i = 0;
+        while (i < unformatted.length())
+        {
+            if (!isPositionSelectable(i))
+            {
+                unformatted.delete(i, i + 1);
+            }
+            i++;
+        }
+        return unformatted.toString();
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public boolean onTouchEvent(MotionEvent event)
     {
@@ -293,6 +315,7 @@ public class EditMacAddress extends EditText
         }
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs)
     {
@@ -348,14 +371,15 @@ public class EditMacAddress extends EditText
                     if (isPositionSelectable(dstart))
                     {
                         mBackspacePressed = true;
-                        return mFiller;
+                        return String.valueOf(mFiller);
                     }
                     else
                     {
-                        return mDelimiter;
+                        // should never be here
+                        return String.valueOf(mMask[dstart].getFiller());
                     }
                 }
-                else if (!isValidSymbolForPosition(source.charAt(start), dstart))
+                else if (!isValidCharForPosition(source.charAt(start), dstart))
                 {
                     mInputRejected = true;
                     return destination.subSequence(dstart, dend);
@@ -365,20 +389,30 @@ public class EditMacAddress extends EditText
             else
             {
                 StringBuilder builder = new StringBuilder();
-                builder.append(source.subSequence(start, end).toString().replaceAll("[^0-9A-Fa-f" + Pattern.quote(mFiller) + "]", ""));
-                int replacementLength = dend - dstart + (mTextLength - destination.length());
-                while (builder.length() < replacementLength)
-                {
-                    builder.append(mFiller);
-                }
+                builder.append(source.subSequence(start, end).toString());
+
                 int i = 0;
-                while (i < replacementLength)
+                while (i < builder.length())
                 {
-                    if (!isPositionSelectable(i + dstart))
+                    if (!isPositionSelectable(dstart + 1))
                     {
-                        builder.insert(i, mDelimiter);
+                        builder.insert(i, getFillerForPosition(dstart + i));
+                        i++;
                     }
-                    i++;
+                    else if (!isValidCharForPosition(builder.charAt(i), dstart + i))
+                    {
+                        builder.delete(i, i + 1);
+                    }
+                    else
+                    {
+                        i++;
+                    }
+                }
+
+                int replacementLength = dend - dstart + (getMaskLength() - destination.length());
+                while ((i = builder.length()) < replacementLength)
+                {
+                    builder.append(getFillerForPosition(i));
                 }
 
                 return builder.substring(0, replacementLength);
