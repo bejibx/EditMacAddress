@@ -16,6 +16,6 @@ public final class DelimiterCharFilter extends CharFilter
     @Override
     protected boolean isValidChar(char c)
     {
-        return false;
+        return c == mFiller;
     }
 }

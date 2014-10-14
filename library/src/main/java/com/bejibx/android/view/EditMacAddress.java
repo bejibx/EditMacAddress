@@ -2,6 +2,8 @@ package com.bejibx.android.view;
 
 import android.content.Context;
 import android.content.res.TypedArray;
+import android.graphics.Rect;
+import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.text.Layout;
@@ -34,7 +36,7 @@ import java.util.LinkedList;
  */
 public class EditMacAddress extends EditText
 {
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = true;
     private static final String TAG = "EditMacAddress";
     private static final char DEFAULT_FILLER = ' ';
 
@@ -44,11 +46,14 @@ public class EditMacAddress extends EditText
     private int mFirstSelectablePosition = 0;
     private int mLastSelectablePosition = 0;
 
+    private String mEmptyMask;
+    private String mTextCache;
+
     private HashMap<Character, CharFilter> mFiltersCache = new HashMap<Character, CharFilter>();
-    private CharFilter[] mMask;
+    private CharFilter[] mCharFilters;
 
     private boolean mBackspacePressed = false;
-    private boolean mInputRejected = false;
+    private boolean mDoNotMoveSelection = false;
 
     public EditMacAddress(Context context)
     {
@@ -76,7 +81,7 @@ public class EditMacAddress extends EditText
         setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         setImeOptions(getImeOptions() | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
 
-        parseMask("HH:HH:HH:HH:HH:HH");
+        setMask("HH:HH:HH:HH:HH:HH");
 
         setFilters(new InputFilter[]{new MacAddressInputValidator()});
     }
@@ -103,7 +108,7 @@ public class EditMacAddress extends EditText
         }
     }
 
-    private void parseMask(String mask)
+    public void setMask(String mask)
     {
         LinkedList<CharFilter> positions = new LinkedList<CharFilter>();
         char[] chars = mask.toCharArray();
@@ -145,25 +150,26 @@ public class EditMacAddress extends EditText
             i++;
         }
 
-        mMask = positions.toArray(new CharFilter[positions.size()]);
-        setText(maskString.toString());
+        mCharFilters = positions.toArray(new CharFilter[positions.size()]);
+        mEmptyMask = maskString.toString();
+        setText(mEmptyMask);
     }
 
     private boolean isPositionSelectable(int position)
     {
-        return position >= 0 && position < getMaskLength() && mMask[position].isSelectable();
+        return position >= 0 && position < getMaskLength() && mCharFilters[position].isSelectable();
     }
 
     private boolean isValidCharForPosition(char c, int pos)
     {
-        return pos >= 0 && pos < getMaskLength() && mMask[pos].isValidChar(c);
+        return pos >= 0 && pos < getMaskLength() && mCharFilters[pos].isValidChar(c);
     }
 
     private char getFillerForPosition(int position)
     {
         if (position >= 0 && position < getMaskLength())
         {
-            return mMask[position].getFiller();
+            return mCharFilters[position].getFiller();
         }
         else
         {
@@ -173,14 +179,14 @@ public class EditMacAddress extends EditText
 
     private int getMaskLength()
     {
-        return mMask != null ? mMask.length : -1;
+        return mCharFilters != null ? mCharFilters.length : -1;
     }
 
     private int getNextSelectablePosition(int pos)
     {
         if (pos >= 0)
             for (int i = pos + 1; i < getMaskLength(); i++)
-                if (mMask[i].isSelectable())
+                if (mCharFilters[i].isSelectable())
                     return i;
 
         return getLastSelectablePosition();
@@ -190,7 +196,7 @@ public class EditMacAddress extends EditText
     {
         if (pos < getMaskLength())
             for (int i = pos - 1; i >= 0; i--)
-                if (mMask[i].isSelectable())
+                if (mCharFilters[i].isSelectable())
                     return i;
 
         return getFirstSelectablePosition();
@@ -269,6 +275,7 @@ public class EditMacAddress extends EditText
     public boolean onTouchEvent(MotionEvent event)
     {
         super.onTouchEvent(event);
+
         switch (event.getAction())
         {
             case MotionEvent.ACTION_DOWN:
@@ -295,23 +302,27 @@ public class EditMacAddress extends EditText
     @Override
     protected void onTextChanged(CharSequence text, int start, int before, int after)
     {
-        if (DEBUG) Log.v(TAG, String.format("onTextChanged(text: \"%s\", start: %d, before: %d, after: %d)", text, start, before, after));
-        super.onTextChanged(text, start, before, after);
-        if (!mInputRejected)
+        if (DEBUG)
         {
-            if (!mBackspacePressed)
-            {
-                moveSelectionDown();
-            }
-            else
-            {
-                mBackspacePressed = false;
-                moveSelectionUp();
-            }
+            String debugMessage = String.format("onTextChanged(text: \"%s\", start: %d, before:" +
+                            " %d, after: %d)", text, start, before, after);
+            Log.v(TAG, debugMessage);
+        }
+
+        super.onTextChanged(text, start, before, after);
+        if (mDoNotMoveSelection)
+        {
+            mDoNotMoveSelection = false;
+
+        }
+        else if (!mBackspacePressed)
+        {
+            moveSelectionDown();
         }
         else
         {
-            mInputRejected = false;
+            mBackspacePressed = false;
+            moveSelectionUp();
         }
     }
 
@@ -356,67 +367,113 @@ public class EditMacAddress extends EditText
                     source, start, end, destination, dstart, dend)
             );
 
-            /* Insertion is not allowed */
-            if (dend - dstart == 0 && destination.length() > 0)
+            if (isFocused())
             {
-                return "";
-            }
+                /* Insertion is not allowed */
+                if (dend - dstart == 0 && destination.length() > 0)
+                {
+                    return "";
+                }
 
-            /* One-char rules. Should work most of the time */
-            if (dend - dstart == 1)
-            {
-                /* One char is going to be deleted */
-                if (end - start == 0)
+                /* One-char rules. Should work most of the time */
+                if (dend - dstart == 1)
                 {
-                    if (isPositionSelectable(dstart))
+                    /* One char is going to be deleted */
+                    if (end - start == 0)
                     {
-                        mBackspacePressed = true;
-                        return String.valueOf(mFiller);
+                        if (isPositionSelectable(dstart))
+                        {
+                            mBackspacePressed = true;
+                            return String.valueOf(mFiller);
+                        }
+                        else
+                        {
+                            // should never be here
+                            return String.valueOf(mCharFilters[dstart].getFiller());
+                        }
                     }
-                    else
+                    else if (!isValidCharForPosition(source.charAt(start), dstart))
                     {
-                        // should never be here
-                        return String.valueOf(mMask[dstart].getFiller());
+                        mDoNotMoveSelection = true;
+                        return destination.subSequence(dstart, dend);
                     }
+                    else return null;
                 }
-                else if (!isValidCharForPosition(source.charAt(start), dstart))
+                else
                 {
-                    mInputRejected = true;
-                    return destination.subSequence(dstart, dend);
+                    StringBuilder builder = new StringBuilder();
+                    builder.append(source.subSequence(start, end).toString());
+
+                    int i = 0;
+                    while (i < builder.length())
+                    {
+                        if (!isPositionSelectable(dstart + 1))
+                        {
+                            builder.insert(i, getFillerForPosition(dstart + i));
+                            i++;
+                        }
+                        else if (!isValidCharForPosition(builder.charAt(i), dstart + i))
+                        {
+                            builder.delete(i, i + 1);
+                        }
+                        else
+                        {
+                            i++;
+                        }
+                    }
+
+                    int replacementLength = dend - dstart + (getMaskLength() - destination.length());
+                    while ((i = builder.length()) < replacementLength)
+                    {
+                        builder.append(getFillerForPosition(i));
+                    }
+
+                    return builder.substring(0, replacementLength);
                 }
-                else return null;
             }
             else
             {
-                StringBuilder builder = new StringBuilder();
-                builder.append(source.subSequence(start, end).toString());
-
-                int i = 0;
-                while (i < builder.length())
-                {
-                    if (!isPositionSelectable(dstart + 1))
-                    {
-                        builder.insert(i, getFillerForPosition(dstart + i));
-                        i++;
-                    }
-                    else if (!isValidCharForPosition(builder.charAt(i), dstart + i))
-                    {
-                        builder.delete(i, i + 1);
-                    }
-                    else
-                    {
-                        i++;
-                    }
-                }
-
-                int replacementLength = dend - dstart + (getMaskLength() - destination.length());
-                while ((i = builder.length()) < replacementLength)
-                {
-                    builder.append(getFillerForPosition(i));
-                }
-
-                return builder.substring(0, replacementLength);
+                return null;
             }
         }
+    }
+
+    @Override
+    protected void onFocusChanged(boolean focused, int direction, Rect previouslyFocusedRect)
+    {
+        if (focused)
+        {
+            Editable text = getText();
+            if (text != null)
+            {
+                String textStr = text.toString();
+                if (textStr.equals(""))
+                {
+                    setText(mEmptyMask);
+                }
+            }
+            selectAtPosition(mCursorPosition);
+        }
+        else
+        {
+            Editable text = getText();
+            if (text != null)
+            {
+                String textStr = text.toString();
+                CharSequence hint = getHint();
+                if (hint != null && hint.length() > 0 && textStr.equals(mEmptyMask))
+                {
+                    setText("");
+                }
+            }
+        }
+        super.onFocusChanged(focused, direction, previouslyFocusedRect);
+    }
+
+    @Override
+    public void setText(CharSequence text, BufferType type)
+    {
+        mDoNotMoveSelection = true;
+        super.setText(text, type);
     }
 }

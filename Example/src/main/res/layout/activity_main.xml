@@ -13,7 +13,8 @@
         android:id="@+id/emac_1"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:typeface="monospace" />
+        android:typeface="monospace"
+        android:hint="MAC Address" />
 
     <com.bejibx.android.view.EditMacAddress
         android:id="@+id/emac_2"
@@ -21,7 +22,6 @@
         android:layout_height="wrap_content"
         android:layout_below="@+id/emac_1"
         android:typeface="monospace"
-        custom:filler="_"
-        custom:delimiter="-" />
+        custom:filler="_" />
 
 </RelativeLayout>
