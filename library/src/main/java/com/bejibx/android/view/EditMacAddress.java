@@ -5,14 +5,11 @@ import android.content.res.TypedArray;
 import android.graphics.Rect;
 import android.text.Editable;
 import android.text.InputFilter;
-import android.text.InputType;
 import android.text.Layout;
 import android.text.Spanned;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
-import android.view.View;
-import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.EditText;
@@ -47,7 +44,6 @@ public class EditMacAddress extends EditText
     private int mLastSelectablePosition = 0;
 
     private String mEmptyMask;
-    private String mTextCache;
 
     private HashMap<Character, CharFilter> mFiltersCache = new HashMap<Character, CharFilter>();
     private CharFilter[] mCharFilters;
@@ -78,7 +74,6 @@ public class EditMacAddress extends EditText
     private void initializeView()
     {
         setCursorVisible(false);
-        setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         setImeOptions(getImeOptions() | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
 
         setMask("HH:HH:HH:HH:HH:HH");
@@ -227,7 +222,7 @@ public class EditMacAddress extends EditText
     public void selectAtPosition(int position)
     {
         if (DEBUG) Log.v(TAG, String.format("selectAtPosition(position: %d)", position));
-        if (getText().length() > 0)
+        if (getText().length() > 0 && mCharFilters != null && mCharFilters.length > 0)
         {
             if (!isPositionSelectable(position))
             {
@@ -330,30 +325,7 @@ public class EditMacAddress extends EditText
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs)
     {
-        return new NoSelectionInputConnection(this, false);
-    }
-
-    /**
-     * This class is absolutely needed because it seems that some soft input methods incorrectly
-     * changing selection. Because of that often we get incorrect dstart/dend values in our input
-     * filter. For example we have [11:22:33:44:55:6|6|], so when user press "delete" button we
-     * are expecting to get dstart == 16 and dend == 17, but instead we get dstart == 15,
-     * dend == 16. When rejecting selection changes in input connection everything works as
-     * expected.
-     */
-    private class NoSelectionInputConnection extends BaseInputConnection
-    {
-        public NoSelectionInputConnection(View targetView, boolean fullEditor)
-        {
-            super(targetView, fullEditor);
-        }
-
-        @Override
-        public boolean setSelection(int start, int end)
-        {
-            //do nothing
-            return true;
-        }
+        return new InputConnectionWrapper(super.onCreateInputConnection(outAttrs));
     }
 
     private class MacAddressInputValidator implements InputFilter
